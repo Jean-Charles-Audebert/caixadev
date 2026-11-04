@@ -1,0 +1,9 @@
+# Profil "test" — utilisé par les tests automatisés (local et CI).
+# La connexion PostgreSQL est fournie par variables d'environnement.
+# En CI : service postgres sur localhost:5432, base caixadev_test (cf. .github/workflows/ci.yml).
+# En local : surcharger DB_URL pour viser l'instance locale (ex. port 5433).
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/caixadev_test}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
