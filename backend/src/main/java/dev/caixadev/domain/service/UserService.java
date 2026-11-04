@@ -40,6 +40,12 @@ public class UserService implements UserUseCase {
     }
 
     @Override
+    public User getProfile(Long id) {
+        return userRepository.findById(id)
+                .orElseThrow(() -> new UserNotFoundException(id));
+    }
+
+    @Override
     @Transactional
     public User createUser(String email, String password, String displayName) {
         if (userRepository.existsByEmail(email)) {

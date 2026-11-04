@@ -25,7 +25,7 @@ public class UserController {
 
     @GetMapping
     public ResponseEntity<UserResponse> getMe(@AuthenticationPrincipal TokenClaims claims) {
-        return ResponseEntity.ok(UserResponse.from(userUseCase.getUserById(claims.userId())));
+        return ResponseEntity.ok(UserResponse.from(userUseCase.getProfile(claims.userId())));
     }
 
     @GetMapping("/projects")
