@@ -6,10 +6,13 @@ on:
   pull_request:
     branches: [develop, main]
 
+permissions:
+  contents: read
+
 jobs:
   backend:
     name: Backend — Build & Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     defaults:
       run:
         working-directory: backend
@@ -30,10 +33,10 @@ jobs:
           --health-retries 5
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Java 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
@@ -50,16 +53,16 @@ jobs:
 
   frontend:
     name: Frontend — Build & Lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     defaults:
       run:
         working-directory: frontend
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Node 20
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '20'
           cache: npm
@@ -71,3 +74,42 @@ jobs:
       - name: Build
         run: npm run build
 
+  docker:
+    name: Docker — Build images (no push)
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # cache-to uniquement sur push : les caches écrits depuis une PR sont
+      # scopés sur la ref de la PR et ne sont jamais réutilisés (quota gaspillé).
+      - name: Build backend image
+        uses: docker/build-push-action@v7
+        with:
+          context: backend
+          push: false
+          load: true
+          tags: caixadev-backend:ci
+          cache-from: type=gha,scope=backend
+          cache-to: ${{ github.event_name != 'pull_request' && 'type=gha,mode=max,scope=backend' || '' }}
+
+      - name: Verify backend image
+        run: docker image inspect caixadev-backend:ci > /dev/null
+
+      - name: Build frontend image
+        uses: docker/build-push-action@v7
+        with:
+          context: frontend
+          push: false
+          load: true
+          tags: caixadev-frontend:ci
+          cache-from: type=gha,scope=frontend
+          cache-to: ${{ github.event_name != 'pull_request' && 'type=gha,mode=max,scope=frontend' || '' }}
+
+      - name: Verify frontend image
+        run: docker image inspect caixadev-frontend:ci > /dev/null
