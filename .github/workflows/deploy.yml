@@ -4,11 +4,20 @@ on:
   push:
     branches: [main]
 
+# Un seul deploiement a la fois : deux push rapproches sur main ne doivent pas
+# se chevaucher sur le VPS. cancel-in-progress: false => le second attend que
+# le premier se termine (aucun deploiement interrompu a mi-parcours).
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
 env:
   REGISTRY: ghcr.io
+  REMOTE_APP_DIR: /opt/caixadev
+  COMPOSE_FILE: docker-compose.prod.yml
 
 jobs:
   build-and-push:
@@ -21,6 +30,39 @@ jobs:
       image_prefix: ${{ steps.image_prefix.outputs.value }}
 
     steps:
+      # Un secret manquant doit bloquer AVANT toute publication d'image.
+      # Les valeurs ne sont jamais ecrites : seuls les noms sont affiches.
+      - name: Preflight - required secrets
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          DB_USERNAME: ${{ secrets.DB_USERNAME }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          SUPER_ADMIN_EMAIL: ${{ secrets.SUPER_ADMIN_EMAIL }}
+          SUPER_ADMIN_PASSWORD: ${{ secrets.SUPER_ADMIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=""
+          for name in VPS_HOST VPS_USER SSH_PRIVATE_KEY DB_USERNAME DB_PASSWORD \
+                      JWT_SECRET SUPER_ADMIN_EMAIL SUPER_ADMIN_PASSWORD; do
+            if [ -z "$(printenv "$name" || true)" ]; then
+              missing="${missing} ${name}"
+            fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Secrets obligatoires absents ou vides:${missing}"
+            exit 1
+          fi
+          # Meme minimum que StartupSecurityValidator (32 octets) : on echoue
+          # ici plutot que de laisser le conteneur backend refuser de demarrer.
+          if [ "${#JWT_SECRET}" -lt 32 ]; then
+            echo "::error::JWT_SECRET doit contenir au moins 32 caracteres."
+            exit 1
+          fi
+          echo "Preflight OK : secrets obligatoires presents."
+
       - uses: actions/checkout@v7
 
       - name: Compute lowercase image prefix
@@ -72,23 +114,75 @@ jobs:
     needs: build-and-push
     permissions:
       contents: read
+      # Jeton utilise pour `docker login ghcr.io` sur le VPS : sans ce droit,
+      # la recuperation des images privees echoue.
+      packages: read
 
     steps:
       - uses: actions/checkout@v7
 
-      - name: Deploy via SSH
+      # ADR-0004 : le Compose de production est transfere par la CI.
+      # Le repertoire doit exister avant le transfert ; s'il ne peut pas etre
+      # cree (utilisateur sans droit sur /opt), l'etape echoue explicitement.
+      - name: Prepare remote directory
         uses: appleboy/ssh-action@v1.2.5
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script_stop: true
           script: |
-            cd /opt/caixadev
-            export IMAGE_PREFIX="${{ needs.build-and-push.outputs.image_prefix }}"
-            export IMAGE_TAG=${{ github.sha }}
-            export DB_USERNAME=${{ secrets.DB_USERNAME }}
-            export DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-            export JWT_SECRET=${{ secrets.JWT_SECRET }}
+            set -eu
+            install -d -m 0755 "${{ env.REMOTE_APP_DIR }}"
+
+      - name: Transfer docker-compose.prod.yml
+        uses: appleboy/scp-action@v1.0.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: ${{ env.COMPOSE_FILE }}
+          target: ${{ env.REMOTE_APP_DIR }}
+          overwrite: true
+          # Le fichier ne contient aucun secret : uniquement des references
+          # ${VARIABLE} resolues a l'execution par docker compose.
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.5
+        env:
+          APP_DIR: ${{ env.REMOTE_APP_DIR }}
+          COMPOSE_FILE_NAME: ${{ env.COMPOSE_FILE }}
+          IMAGE_PREFIX: ${{ needs.build-and-push.outputs.image_prefix }}
+          IMAGE_TAG: ${{ github.sha }}
+          GHCR_ACTOR: ${{ github.actor }}
+          GHCR_TOKEN: ${{ github.token }}
+          DB_USERNAME: ${{ secrets.DB_USERNAME }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          SUPER_ADMIN_EMAIL: ${{ secrets.SUPER_ADMIN_EMAIL }}
+          SUPER_ADMIN_PASSWORD: ${{ secrets.SUPER_ADMIN_PASSWORD }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script_stop: true
+          envs: APP_DIR,COMPOSE_FILE_NAME,IMAGE_PREFIX,IMAGE_TAG,GHCR_ACTOR,GHCR_TOKEN,DB_USERNAME,DB_PASSWORD,JWT_SECRET,SUPER_ADMIN_EMAIL,SUPER_ADMIN_PASSWORD
+          script: |
+            set -eu
+
+            # Garde-fous : aucune commande destructive ne doit s'executer avec
+            # une variable vide, meme si le mapping env/envs est incomplet.
+            : "${APP_DIR:?APP_DIR is required}"
+            : "${COMPOSE_FILE_NAME:?COMPOSE_FILE_NAME is required}"
+            : "${IMAGE_PREFIX:?IMAGE_PREFIX is required}"
+            : "${IMAGE_TAG:?IMAGE_TAG is required}"
+            : "${GHCR_ACTOR:?GHCR_ACTOR is required}"
+            : "${GHCR_TOKEN:?GHCR_TOKEN is required}"
+            : "${DB_USERNAME:?DB_USERNAME is required}"
+            : "${DB_PASSWORD:?DB_PASSWORD is required}"
+            : "${JWT_SECRET:?JWT_SECRET is required}"
+            : "${SUPER_ADMIN_EMAIL:?SUPER_ADMIN_EMAIL is required}"
+            : "${SUPER_ADMIN_PASSWORD:?SUPER_ADMIN_PASSWORD is required}"
 
             case "$IMAGE_PREFIX" in
               *[A-Z]*)
@@ -97,6 +191,26 @@ jobs:
                 ;;
             esac
 
-            docker compose -f docker-compose.prod.yml pull
-            docker compose -f docker-compose.prod.yml up -d --remove-orphans
+            cd "$APP_DIR"
+            if [ ! -f "$COMPOSE_FILE_NAME" ]; then
+              echo "ERROR: $COMPOSE_FILE_NAME absent dans $APP_DIR (transfert echoue)" >&2
+              exit 1
+            fi
+
+            echo "Deploiement de ${IMAGE_PREFIX} (tag ${IMAGE_TAG})"
+
+            # Jeton ephemere du workflow. `docker login` l'ecrit dans
+            # ~/.docker/config.json du compte de deploiement ; le trap le
+            # supprime en sortie, y compris en cas d'echec.
+            printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GHCR_ACTOR" --password-stdin
+            trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+
+            # Echoue si le YAML est invalide ou si une variable `${VAR:?}`
+            # manque. Une variable vide non requise ne fait PAS echouer
+            # `config -q` : elle est deja couverte par les garde-fous ci-dessus.
+            docker compose -f "$COMPOSE_FILE_NAME" config -q
+            # Echoue si une image demandee n'existe pas ou n'est pas accessible.
+            docker compose -f "$COMPOSE_FILE_NAME" pull
+            docker compose -f "$COMPOSE_FILE_NAME" up -d --remove-orphans
+            # Ne supprime que les images non referencees par un tag.
             docker image prune -f
