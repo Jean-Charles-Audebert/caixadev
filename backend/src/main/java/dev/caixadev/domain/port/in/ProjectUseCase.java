@@ -9,7 +9,11 @@ public interface ProjectUseCase {
     /** Projets publics (non authentifié). */
     List<Project> listPublicProjects();
 
-    /** Projets accessibles à un utilisateur (actifs + rôle attribué). */
+    /**
+     * Projets accessibles à un utilisateur : projets actifs auxquels il est
+     * affecté. Un SUPER_ADMIN voit tous les projets actifs, qu'une affectation
+     * existe ou non (rôle global de plateforme).
+     */
     List<ProjectAccess> listAccessibleProjects(Long userId);
 
     /** Liste tous les projets (SuperAdmin uniquement). */
