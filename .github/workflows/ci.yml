@@ -1,10 +1,14 @@
 name: CI
 
+# Sur `main`, la CI n'est pas déclenchée directement par `push` : elle est
+# appelée par `deploy.yml` (workflow_call), qui ne publie et ne déploie que si
+# elle réussit (constat D01 / T47). Les PR vers `main` restent vérifiées ici.
 on:
   push:
-    branches: [develop, main]
+    branches: [develop]
   pull_request:
     branches: [develop, main]
+  workflow_call:
 
 permissions:
   contents: read

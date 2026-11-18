@@ -20,9 +20,19 @@ env:
   COMPOSE_FILE: docker-compose.prod.yml
 
 jobs:
+  # D01 / T47 : aucune image n'est publiee ni deployee si la CI echoue sur ce
+  # commit. L'image backend etant construite avec -DskipTests, ce sont ces
+  # tests qui font foi.
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   build-and-push:
     name: Build & Push Docker images
     runs-on: ubuntu-26.04
+    needs: ci
     permissions:
       contents: read
       packages: write
