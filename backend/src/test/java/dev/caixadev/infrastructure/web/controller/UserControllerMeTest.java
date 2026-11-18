@@ -73,7 +73,8 @@ class UserControllerMeTest {
     @Test
     void unauthenticatedRequestIsRejected() throws Exception {
         mockMvc.perform(get("/api/users/me"))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("UNAUTHORIZED"));
     }
 
     /**

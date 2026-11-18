@@ -4,6 +4,11 @@ spring:
     username: postgres
     password: postgres
 
+  flyway:
+    # Les données de démonstration (projet 'test', rôles de projet) ne sont
+    # chargées qu'en développement.
+    locations: classpath:db/migration,classpath:db/seed
+
   jpa:
     show-sql: true
     properties:
@@ -18,3 +23,6 @@ logging:
 cors:
   allowed-origins: "http://localhost:5173"
 
+jwt:
+  # Valeur locale uniquement, refusée en production.
+  secret: ${JWT_SECRET:dev-only-insecure-jwt-secret-change-me-32chars}

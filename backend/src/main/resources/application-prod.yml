@@ -1,4 +1,28 @@
 spring:
+  datasource:
+    # Toutes les valeurs viennent de l'environnement : aucune valeur par défaut
+    # de développement ne peut être utilisée par erreur en production.
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+
+  flyway:
+    # Migrations de structure uniquement : aucun seed de démonstration.
+    #
+    # V2__Seed_initial.sql vit dans db/seed et n'est chargée qu'en dev. Ce
+    # découpage est valide pour une base vierge : Flyway ne réclame que les
+    # migrations résolues par les locations du profil actif.
+    #
+    # Fragilité connue : une base qui a déjà V2 dans flyway_schema_history et
+    # qui démarre sans db/seed (prod/test) échoue à la validation ("migration
+    # appliquée non résolue localement"). Flyway n'offre pas de tolérance
+    # ciblée par version (`ignore-migration-patterns` attend un *type* :
+    # `versioned`, `repeatable` ou `*`, jamais `2`). Un `*:missing` masquerait
+    # toute migration réellement absente : il est volontairement interdit.
+    # Remédiation documentée dans docs/infrastructure.md, section Flyway.
+    locations: classpath:db/migration
+
   jpa:
     show-sql: false
     properties:
@@ -12,4 +36,3 @@ logging:
 
 cors:
   allowed-origins: "https://caixadev.dev"
-
