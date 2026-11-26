@@ -40,6 +40,15 @@ management:
         readiness:
           include: readinessState,db
 
+# Contrat OpenAPI des outils (cvc-gaines) : uniquement leurs routes, publie
+# sous le prefixe de l'outil donc protege par la cle d'API. Aucune interface
+# Swagger UI n'est embarquee.
+springdoc:
+  api-docs:
+    path: /cvc-gaines/v1/openapi.json
+  paths-to-match: /cvc-gaines/v1/**
+  packages-to-scan: dev.caixadev.tools.cvcgaines.api
+
 jwt:
   # Aucune valeur par défaut : le secret doit venir de l'environnement.
   # Les profils dev et test définissent une valeur locale explicite.

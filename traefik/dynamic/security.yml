@@ -66,6 +66,23 @@ http:
       headers:
         contentSecurityPolicy: "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests"
 
+    # --- CSP de l'API machine (cvc-gaines) --------------------------------
+    # Reponses JSON uniquement : rien ne doit etre charge ni encadre.
+    csp-api:
+      headers:
+        contentSecurityPolicy: "default-src 'none'; frame-ancestors 'none'"
+
+    # --- Limitation de debit de l'API machine ------------------------------
+    # Par IP client reelle : rafale de 30, puis 60 appels par minute. Les
+    # calculs sont legers ; la limite protege le VPS d'un client qui boucle.
+    api-ratelimit:
+      rateLimit:
+        average: 60
+        period: 1m
+        burst: 30
+        sourceCriterion:
+          requestHeaderName: CF-Connecting-IP
+
     # --- Limitation de debit de la connexion (T38) -------------------------
     # Par adresse IP du client reelle (CF-Connecting-IP, fiable puisque seul
     # Cloudflare atteint l'origine) : rafale de 5, puis 5 tentatives par
