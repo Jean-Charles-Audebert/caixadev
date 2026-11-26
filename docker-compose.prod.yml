@@ -164,6 +164,13 @@ services:
       - traefik.http.routers.cvc-gaines.middlewares=api-ratelimit@file,csp-api@file
       - traefik.http.routers.cvc-gaines.service=cvc-gaines
       - traefik.http.services.cvc-gaines.loadbalancer.server.port=8080
+      # Serveur MCP (T25) : https://mcp.<domaine>/cvc-gaines, reecrit vers le
+      # servlet MCP du backend (/cvc-gaines/mcp), protege par la meme cle d'API.
+      - traefik.http.routers.cvc-gaines-mcp.rule=Host(`mcp.${DOMAIN:-caixadev.dev}`) && Path(`/cvc-gaines`)
+      - traefik.http.routers.cvc-gaines-mcp.entrypoints=websecure
+      - traefik.http.routers.cvc-gaines-mcp.middlewares=cvc-gaines-mcp-path,api-ratelimit@file,csp-api@file
+      - traefik.http.routers.cvc-gaines-mcp.service=cvc-gaines
+      - traefik.http.middlewares.cvc-gaines-mcp-path.replacepath.path=/cvc-gaines/mcp
     depends_on:
       postgres:
         condition: service_healthy

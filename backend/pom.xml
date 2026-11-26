@@ -27,6 +27,33 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-data-jpa</artifactId>
 		</dependency>
+		<!-- Serveur MCP de cvc-gaines (SDK officiel, transport HTTP sans etat, Jackson 2). -->
+		<dependency>
+			<groupId>io.modelcontextprotocol.sdk</groupId>
+			<artifactId>mcp-core</artifactId>
+			<version>2.2.0</version>
+		</dependency>
+		<dependency>
+			<groupId>io.modelcontextprotocol.sdk</groupId>
+			<artifactId>mcp-json-jackson2</artifactId>
+			<version>2.2.0</version>
+		</dependency>
+		<!-- Schemas JSON des outils MCP generes depuis les DTO de l'API. -->
+		<dependency>
+			<groupId>com.github.victools</groupId>
+			<artifactId>jsonschema-generator</artifactId>
+			<version>4.38.0</version>
+		</dependency>
+		<dependency>
+			<groupId>com.github.victools</groupId>
+			<artifactId>jsonschema-module-jakarta-validation</artifactId>
+			<version>4.38.0</version>
+		</dependency>
+		<dependency>
+			<groupId>com.github.victools</groupId>
+			<artifactId>jsonschema-module-swagger-2</artifactId>
+			<version>4.38.0</version>
+		</dependency>
 		<!-- Contrat OpenAPI de cvc-gaines (sans interface Swagger UI). -->
 		<dependency>
 			<groupId>org.springdoc</groupId>

@@ -2,6 +2,7 @@ package dev.caixadev.infrastructure.security;
 
 import dev.caixadev.domain.model.ApiKeyScopes;
 import dev.caixadev.domain.port.in.ApiKeyUseCase;
+import jakarta.servlet.DispatcherType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
@@ -86,6 +87,12 @@ public class SecurityConfig {
                         .accessDeniedHandler(accessDeniedHandler)
                 )
                 .authorizeHttpRequests(auth -> auth
+                        // Rendu d'une erreur deja decidee par la requete d'origine (sendError :
+                        // 405 du serveur MCP, 404...). Sans cette regle, le rendu de /error
+                        // est lui-meme refuse et toute erreur devient un 401 trompeur. Aucun
+                        // acces n'est accorde : la requete d'origine a deja passe (ou non)
+                        // sa propre autorisation.
+                        .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/refresh", "/api/auth/logout").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/projects/public").permitAll()
                         // Healthcheck Docker (T12) : statut seul, sans detail.
