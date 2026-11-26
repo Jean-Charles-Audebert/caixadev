@@ -153,10 +153,23 @@ services:
       retries: 3
       start_period: 90s
       start_interval: 5s
+    # API machine des outils (ADR-0009, ADR-0010) : seul le prefixe de l'outil
+    # est routable sur api.<domaine>. /api/** (plateforme) et /actuator/**
+    # restent inaccessibles par ce domaine. Authentification par cle d'API
+    # dans le backend ; limitation de debit dans Traefik.
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.cvc-gaines.rule=Host(`api.${DOMAIN:-caixadev.dev}`) && PathPrefix(`/cvc-gaines/`)
+      - traefik.http.routers.cvc-gaines.entrypoints=websecure
+      - traefik.http.routers.cvc-gaines.middlewares=api-ratelimit@file,csp-api@file
+      - traefik.http.routers.cvc-gaines.service=cvc-gaines
+      - traefik.http.services.cvc-gaines.loadbalancer.server.port=8080
     depends_on:
       postgres:
         condition: service_healthy
     networks:
+      # web : uniquement pour etre joint par Traefik (routeur ci-dessus).
+      - web
       - caixanet
     logging: *default-logging
 
