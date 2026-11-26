@@ -7,45 +7,62 @@ class ApiException extends Error {
   }
 }
 
-let isRefreshing = false;
+/**
+ * Renouvellement de session partagé : une seule requête /api/auth/refresh
+ * est en vol à la fois. Les appelants concurrents attendent la même promesse
+ * puis reprennent leur requête, au lieu d'échouer immédiatement.
+ */
+let refreshPromise: Promise<boolean> | null = null;
 
-async function tryRefresh(): Promise<boolean> {
-  if (isRefreshing) return false;
-  isRefreshing = true;
-  try {
-    const res = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' });
-    return res.ok;
-  } catch {
-    return false;
-  } finally {
-    isRefreshing = false;
-  }
+function refreshSession(): Promise<boolean> {
+  if (refreshPromise) return refreshPromise;
+
+  refreshPromise = fetch('/api/auth/refresh', {
+    method: 'POST',
+    credentials: 'include',
+  })
+    .then((res) => res.ok)
+    .catch(() => false)
+    .finally(() => {
+      // La promesse est réinitialisée après règlement : un échec ultérieur
+      // pourra déclencher une nouvelle tentative, sans boucle immédiate.
+      refreshPromise = null;
+    });
+
+  return refreshPromise;
+}
+
+function isAuthEndpoint(path: string): boolean {
+  // Comparaison sur le chemin seul : une query string ne doit pas changer la
+  // décision (l'ancienne version `includes('/auth/')` pouvait classifier à tort
+  // une URL quelconque contenant ce fragment).
+  const cleanPath = path.split('?')[0];
+  return cleanPath === '/api/auth' || cleanPath.startsWith('/api/auth/');
+}
+
+function doFetch(path: string, options: RequestInit): Promise<Response> {
+  return fetch(path, {
+    ...options,
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...options.headers },
+  });
 }
 
 export async function request<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const res = await fetch(path, {
-    ...options,
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...options.headers },
-  });
+  let res = await doFetch(path, options);
 
-  if (res.status === 401 && !path.includes('/auth/')) {
-    const refreshed = await tryRefresh();
-    if (refreshed) {
-      const retryRes = await fetch(path, {
-        ...options,
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json', ...options.headers },
-      });
-      if (retryRes.ok) {
-        if (retryRes.status === 204) return null as T;
-        return retryRes.json();
-      }
+  // 401 = non authentifié : une seule tentative de renouvellement, puis
+  // rejeu de la requête. 403 = authentifié sans droit : aucun renouvellement.
+  // Les endpoints d'authentification sont exclus pour éviter toute boucle.
+  if (res.status === 401 && !isAuthEndpoint(path)) {
+    const refreshed = await refreshSession();
+    if (!refreshed) {
+      throw new ApiException(401, 'Session expirée');
     }
-    throw new ApiException(401, 'Session expirée');
+    res = await doFetch(path, options);
   }
 
   if (!res.ok) {
@@ -56,4 +73,3 @@ export async function request<T>(
   if (res.status === 204) return null as T;
   return res.json();
 }
-

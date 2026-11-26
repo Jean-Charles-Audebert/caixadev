@@ -1,0 +1,7 @@
+target/
+.env
+.env.*
+.idea/
+.git/
+*.log
+start-dev.ps1

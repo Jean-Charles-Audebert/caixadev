@@ -11,7 +11,7 @@ import org.springframework.test.context.TestPropertySource;
  * En local : docker-compose up -d avant de lancer.
  */
 @SpringBootTest
-@ActiveProfiles("dev")
+@ActiveProfiles("test")
 @TestPropertySource(properties = {
         "spring.flyway.enabled=true"
 })

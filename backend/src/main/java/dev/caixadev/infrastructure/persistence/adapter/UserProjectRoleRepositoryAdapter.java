@@ -16,6 +16,7 @@ import dev.caixadev.infrastructure.persistence.repository.UserJpaRepository;
 import dev.caixadev.infrastructure.persistence.repository.UserProjectRoleJpaRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
@@ -32,6 +33,7 @@ public class UserProjectRoleRepositoryAdapter implements UserProjectRoleReposito
     private final RoleMapper roleMapper;
 
     @Override
+    @Transactional(readOnly = true)
     public List<UserProjectRole> findByUserId(Long userId) {
         return jpa.findByUserId(userId).stream()
                 .map(e -> new UserProjectRole(

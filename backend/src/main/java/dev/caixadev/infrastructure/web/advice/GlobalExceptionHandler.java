@@ -5,6 +5,8 @@ import dev.caixadev.domain.exception.*;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -59,6 +61,25 @@ public class GlobalExceptionHandler {
                 .collect(Collectors.joining(", "));
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(ApiErrorResponse.of("VALIDATION_ERROR", details));
+    }
+
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ApiErrorResponse> handleAccessDenied(AccessDeniedException ex) {
+        // Cas d'un refus levé par la sécurité de méthode (@PreAuthorize) : sans ce
+        // handler, le catch-all Exception le transformerait en 500 au lieu de 403.
+        // Même format que RestAccessDeniedHandler, pour rester cohérent côté client.
+        log.debug("Accès refusé : {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(ApiErrorResponse.of("FORBIDDEN", "Accès refusé"));
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiErrorResponse> handleUnreadableBody(HttpMessageNotReadableException ex) {
+        // Les détails (structure Jackson, positions) restent dans les journaux de debug,
+        // jamais dans la réponse HTTP.
+        log.debug("Corps de requête illisible : {}", ex.getMostSpecificCause().getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ApiErrorResponse.of("MALFORMED_REQUEST", "Le corps de la requête est invalide"));
     }
 
     @ExceptionHandler(Exception.class)

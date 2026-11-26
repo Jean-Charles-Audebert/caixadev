@@ -7,6 +7,8 @@ import java.util.List;
 public interface UserUseCase {
     List<User> listUsers();
     User getUserById(Long id);
+    /** Profil personnel (inclut les SuperAdmins) — destiné à /users/me uniquement. */
+    User getProfile(Long id);
     User createUser(String email, String password, String displayName);
     User updateUser(Long id, String displayName);
     void deleteUser(Long id);

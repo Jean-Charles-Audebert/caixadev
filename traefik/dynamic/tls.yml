@@ -1,0 +1,22 @@
+# Configuration dynamique Traefik : certificat Cloudflare Origin CA (ADR-0003).
+#
+# Les fichiers du certificat ne sont JAMAIS dans le depot. Ils sont deposes a
+# la main sur le VPS dans /opt/caixadev/certs/ (monte en lecture seule sur
+# /certs) :
+#   - origin.pem : certificat Origin CA couvrant caixadev.dev et *.caixadev.dev
+#   - origin.key : cle privee (chmod 600)
+# Le certificat Origin CA n'est reconnu que par Cloudflare : le mode SSL/TLS
+# Cloudflare doit etre "Full (strict)" et tous les noms en mode proxy.
+tls:
+  certificates:
+    - certFile: /certs/origin.pem
+      keyFile: /certs/origin.key
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /certs/origin.pem
+        keyFile: /certs/origin.key
+  options:
+    default:
+      minVersion: VersionTLS12
+      sniStrict: true

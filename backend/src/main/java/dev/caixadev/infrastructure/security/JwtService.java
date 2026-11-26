@@ -27,7 +27,16 @@ public class JwtService implements TokenPort {
             @Value("${jwt.secret}") String secret,
             @Value("${jwt.access-token-expiration-ms}") long accessTokenExpirationMs
     ) {
-        // La clé doit faire au minimum 32 octets pour HS256
+        if (secret == null || secret.isBlank()) {
+            throw new IllegalStateException(
+                    "JWT_SECRET est absent. Definissez la variable d'environnement JWT_SECRET "
+                            + "(au moins 32 octets aleatoires) avant de demarrer l'application.");
+        }
+        // La cle doit faire au minimum 32 octets pour HS256
+        if (secret.getBytes(StandardCharsets.UTF_8).length < 32) {
+            throw new IllegalStateException(
+                    "JWT_SECRET est trop court : 32 octets minimum sont requis pour HS256.");
+        }
         this.secretKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
         this.accessTokenExpirationMs = accessTokenExpirationMs;
     }
