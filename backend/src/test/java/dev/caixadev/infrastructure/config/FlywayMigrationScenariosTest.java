@@ -81,21 +81,21 @@ class FlywayMigrationScenariosTest {
                 .as("V1 et V2 sont déjà appliquées")
                 .containsExactly("1", "2");
         assertThat(pendingVersions(current))
-                .as("V2 résolue depuis db/seed n'est pas en attente ; seule V3 l'est")
-                .containsExactly("3");
+                .as("V2 résolue depuis db/seed n'est pas en attente ; seules V3 et V4 le sont")
+                .containsExactly("3", "4");
 
         MigrateResult result = current.migrate();
         assertThat(result.migrationsExecuted)
-                .as("seule V3 doit être appliquée, V2 ne doit pas être rejouée")
-                .isEqualTo(1);
+                .as("seules V3 et V4 doivent être appliquées, V2 ne doit pas être rejouée")
+                .isEqualTo(2);
         current.validate();
-        assertThat(appliedVersions(current)).containsExactly("1", "2", "3");
+        assertThat(appliedVersions(current)).containsExactly("1", "2", "3", "4");
         assertThat(count(schema, "SELECT count(*) FROM " + schema + ".projects WHERE key = 'test'"))
                 .as("le seed de démonstration ne doit exister qu'une fois")
                 .isEqualTo(1);
         assertThat(count(schema, "SELECT count(*) FROM " + schema + ".roles WHERE project_id IS NULL"))
                 .isEqualTo(7);
-        assertThat(current.info().current().getVersion().getVersion()).isEqualTo("3");
+        assertThat(current.info().current().getVersion().getVersion()).isEqualTo("4");
     }
 
     /**
@@ -128,31 +128,31 @@ class FlywayMigrationScenariosTest {
         // Remédiation 1 : démarrer une fois avec les locations du profil dev.
         Flyway recovery = flyway(schema, MIGRATIONS_AND_SEED);
         assertThat(pendingVersions(recovery))
-                .as("V2 est de nouveau résolue (donc plus « missing ») ; seule V3 est en attente")
-                .containsExactly("3");
+                .as("V2 est de nouveau résolue (donc plus « missing ») ; seules V3 et V4 sont en attente")
+                .containsExactly("3", "4");
         assertThat(recovery.migrate().migrationsExecuted)
-                .as("V3 doit pouvoir être appliquée après résolution de V2")
-                .isEqualTo(1);
+                .as("V3 et V4 doivent pouvoir être appliquées après résolution de V2")
+                .isEqualTo(2);
         recovery.validate();
-        assertThat(appliedVersions(recovery)).containsExactly("1", "2", "3");
+        assertThat(appliedVersions(recovery)).containsExactly("1", "2", "3", "4");
         assertThat(count(schema, "SELECT count(*) FROM " + schema + ".projects WHERE key = 'test'"))
                 .as("aucune donnée existante ne doit être supprimée")
                 .isEqualTo(1);
     }
 
     /**
-     * Scénario B — base de production vierge : V1 puis V3, aucun seed de démo,
+     * Scénario B — base de production vierge : V1, V3 puis V4, aucun seed de démo,
      * rôles globaux créés, validation OK.
      */
     @Test
-    void scenarioB_blankProductionDatabaseAppliesV1AndV3WithoutDemoData() {
+    void scenarioB_blankProductionDatabaseAppliesV1V3V4WithoutDemoData() {
         String schema = newSchema("scenario_b");
 
         Flyway production = flyway(schema, MIGRATIONS);
         MigrateResult result = production.migrate();
 
-        assertThat(result.migrationsExecuted).isEqualTo(2);
-        assertThat(appliedVersions(production)).containsExactly("1", "3");
+        assertThat(result.migrationsExecuted).isEqualTo(3);
+        assertThat(appliedVersions(production)).containsExactly("1", "3", "4");
         production.validate();
         assertThat(count(schema, "SELECT count(*) FROM " + schema + ".roles WHERE project_id IS NULL"))
                 .as("les 7 rôles globaux doivent être créés par V3")
@@ -163,7 +163,7 @@ class FlywayMigrationScenariosTest {
     }
 
     /**
-     * Scénario C — nouvelle base de développement : V1, V2 (démo), V3, sans doublon.
+     * Scénario C — nouvelle base de développement : V1, V2 (démo), V3, V4, sans doublon.
      */
     @Test
     void scenarioC_blankDevelopmentDatabaseAppliesSeedThenGlobalRoles() {
@@ -172,8 +172,8 @@ class FlywayMigrationScenariosTest {
         Flyway development = flyway(schema, MIGRATIONS_AND_SEED);
         MigrateResult result = development.migrate();
 
-        assertThat(result.migrationsExecuted).isEqualTo(3);
-        assertThat(appliedVersions(development)).containsExactly("1", "2", "3");
+        assertThat(result.migrationsExecuted).isEqualTo(4);
+        assertThat(appliedVersions(development)).containsExactly("1", "2", "3", "4");
         development.validate();
         assertThat(count(schema, "SELECT count(*) FROM " + schema + ".roles WHERE project_id IS NULL"))
                 .as("V3 est idempotente : pas de doublon des rôles déjà insérés par V2")
@@ -185,7 +185,7 @@ class FlywayMigrationScenariosTest {
     }
 
     /**
-     * Scénario D — une future migration V4 dans db/migration s'applique après V3,
+     * Scénario D — une future migration (V5) s'applique après les migrations existantes,
      * y compris sur une base de développement dont l'historique contient le seed V2.
      */
     @Test
@@ -194,8 +194,8 @@ class FlywayMigrationScenariosTest {
 
         flyway(schema, MIGRATIONS_AND_SEED).migrate();
 
-        Path futureLocation = Files.createTempDirectory("caixadev-future-v4");
-        Files.writeString(futureLocation.resolve("V4__Probe_marker.sql"),
+        Path futureLocation = Files.createTempDirectory("caixadev-future-v5");
+        Files.writeString(futureLocation.resolve("V5__Probe_marker.sql"),
                 "CREATE TABLE probe_marker (id BIGINT PRIMARY KEY);\n");
 
         Flyway withFuture = flyway(schema,
@@ -203,7 +203,7 @@ class FlywayMigrationScenariosTest {
         MigrateResult result = withFuture.migrate();
 
         assertThat(result.migrationsExecuted).isEqualTo(1);
-        assertThat(appliedVersions(withFuture)).containsExactly("1", "2", "3", "4");
+        assertThat(appliedVersions(withFuture)).containsExactly("1", "2", "3", "4", "5");
         withFuture.validate();
         assertThat(count(schema, "SELECT count(*) FROM " + schema + ".probe_marker")).isZero();
     }

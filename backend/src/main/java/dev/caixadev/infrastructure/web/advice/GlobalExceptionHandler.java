@@ -11,6 +11,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.util.stream.Collectors;
 
@@ -46,6 +47,25 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiErrorResponse> handleRoleNotFound(RoleNotFoundException ex) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .body(ApiErrorResponse.of("NOT_FOUND", ex.getMessage()));
+    }
+
+    @ExceptionHandler(ApiKeyNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleApiKeyNotFound(ApiKeyNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiErrorResponse.of("NOT_FOUND", ex.getMessage()));
+    }
+
+    @ExceptionHandler(InvalidApiKeyRequestException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidApiKeyRequest(InvalidApiKeyRequestException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ApiErrorResponse.of("VALIDATION_ERROR", ex.getMessage()));
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ApiErrorResponse> handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
+        // Ex. identifiant non UUID dans l'URL : 400 plutôt que 500.
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ApiErrorResponse.of("VALIDATION_ERROR", "Paramètre invalide : " + ex.getName()));
     }
 
     @ExceptionHandler(UserAlreadyExistsException.class)
