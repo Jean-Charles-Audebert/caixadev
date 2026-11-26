@@ -56,13 +56,13 @@ jobs:
           VPS_SSH_FINGERPRINT: ${{ secrets.VPS_SSH_FINGERPRINT }}
         run: |
           set -euo pipefail
-          case "$VPS_SSH_FINGERPRINT" in
-            SHA256:?*) echo "Empreinte SSH presente." ;;
-            *)
-              echo "::error::VPS_SSH_FINGERPRINT absent ou mal forme (attendu : SHA256:...)"
-              exit 1
-              ;;
-          esac
+          # Comparaison exacte cote appleboy : la valeur doit etre l'empreinte
+          # seule (SHA256:<base64 sans =>), sans commentaire ni espace.
+          if ! printf '%s' "$VPS_SSH_FINGERPRINT" | grep -Eq '^SHA256:[A-Za-z0-9+/]{43}$'; then
+            echo "::error::VPS_SSH_FINGERPRINT absent ou mal forme : attendu 'SHA256:' suivi de 43 caracteres, sans espace ni commentaire (ex. root@hote)."
+            exit 1
+          fi
+          echo "Empreinte SSH presente et bien formee."
 
       - uses: actions/checkout@v7
         with:
@@ -207,7 +207,18 @@ jobs:
               echo "Service backup arrete ou absent : pas de sauvegarde avant deploiement."
             fi
 
-            docker compose -f "$COMPOSE_FILE_NAME" up -d --remove-orphans
+            # T12 : --wait attend que chaque service soit healthy (ou demarre,
+            # pour ceux sans healthcheck) et echoue sinon. Le deploiement n'est
+            # inscrit dans l'historique que si la nouvelle version est saine :
+            # en cas d'echec, relancer Rollback vers la derniere ligne.
+            if ! docker compose -f "$COMPOSE_FILE_NAME" up -d --remove-orphans --wait --wait-timeout 180; then
+              echo "ERROR: services non sains apres 180 s. Etat :" >&2
+              docker compose -f "$COMPOSE_FILE_NAME" ps -a >&2 || true
+              docker compose -f "$COMPOSE_FILE_NAME" logs --tail 50 backend >&2 || true
+              echo "Version precedente : ${current:-inconnue} (workflow Rollback)" >&2
+              exit 1
+            fi
+            docker compose -f "$COMPOSE_FILE_NAME" ps
             printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$IMAGE_TAG" >> "$HISTORY"
             # Ne supprime que les images non referencees par un tag : les
             # images des versions precedentes restent disponibles localement.

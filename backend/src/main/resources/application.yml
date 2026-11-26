@@ -20,6 +20,26 @@ spring:
 server:
   port: ${SERVER_PORT:8080}
 
+# Sante (T12) : seul l'endpoint health est expose, sans aucun detail
+# (versions, base, disque). Il sert au healthcheck Docker et n'est pas
+# joignable depuis Internet : le nginx du frontend ne relaie que /api/.
+#   /actuator/health/liveness  : le processus repond
+#   /actuator/health/readiness : pret a servir, base de donnees comprise
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+      show-components: never
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,db
+
 jwt:
   # Aucune valeur par défaut : le secret doit venir de l'environnement.
   # Les profils dev et test définissent une valeur locale explicite.
