@@ -1,0 +1,76 @@
+name: Rollback
+
+# T18 : redeploie un commit deja publie (images ghcr.io/...:<sha> existantes),
+# sans CI ni rebuild. Lancement : onglet Actions > Rollback > Run workflow,
+# avec le SHA complet du commit vise (historique : deploy-history.log sur le
+# VPS, ou `git log --first-parent main`).
+#
+# Le rollback ne touche pas a la base : une migration Flyway deja appliquee
+# reste en place. Si l'ancienne version n'est pas compatible avec le schema,
+# restaurer la sauvegarde prise juste avant le deploiement fautif
+# (scripts/backup/pg-backup.sh restore, voir docs/infrastructure.md).
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: SHA complet (40 caracteres) d'un commit de main deja deploye
+        required: true
+        type: string
+
+# Meme groupe que deploy.yml : un rollback attend la fin d'un deploiement en
+# cours, et inversement.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check target commit
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Validate SHA format
+        env:
+          SHA: ${{ inputs.sha }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::sha doit etre un SHA complet de 40 caracteres hexadecimaux (minuscules)."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      # Seul un commit de main a pu etre construit et publie par deploy.yml :
+      # on refuse une branche de travail ou un commit inconnu.
+      - name: Ensure commit belongs to main
+        env:
+          SHA: ${{ inputs.sha }}
+        run: |
+          set -euo pipefail
+          if ! git cat-file -e "${SHA}^{commit}" 2>/dev/null; then
+            echo "::error::Commit $SHA introuvable dans le depot."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$SHA" origin/main; then
+            echo "::error::Commit $SHA absent de l'historique de main."
+            exit 1
+          fi
+          echo "Cible : $(git log -1 --format='%h %s (%cs)' "$SHA")"
+
+  deploy:
+    name: Deploy to VPS
+    needs: check
+    uses: ./.github/workflows/deploy-vps.yml
+    with:
+      ref: ${{ inputs.sha }}
+    secrets: inherit
+    permissions:
+      contents: read
+      packages: read
