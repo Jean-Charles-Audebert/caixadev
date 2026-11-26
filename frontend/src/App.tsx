@@ -6,6 +6,7 @@ import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import UnauthorizedPage from './pages/UnauthorizedPage';
+import ApiKeysPage from './pages/ApiKeysPage';
 
 export default function App() {
   return (
@@ -20,6 +21,14 @@ export default function App() {
             element={
               <PrivateRoute>
                 <DashboardPage />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/admin/api-keys"
+            element={
+              <PrivateRoute>
+                <ApiKeysPage />
               </PrivateRoute>
             }
           />
