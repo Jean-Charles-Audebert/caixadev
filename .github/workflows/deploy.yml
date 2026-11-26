@@ -165,16 +165,19 @@ jobs:
           script: |
             set -eu
             install -d -m 0755 "${{ env.REMOTE_APP_DIR }}"
+            # Sauvegardes PostgreSQL (T17) : contiennent des donnees sensibles.
+            install -d -m 0700 "${{ env.REMOTE_APP_DIR }}/backups"
 
-      # Compose + configuration dynamique Traefik (arborescence conservee :
-      # traefik/dynamic/tls.yml arrive dans ${REMOTE_APP_DIR}/traefik/dynamic/).
+      # Compose, configuration dynamique Traefik et script de sauvegarde
+      # (arborescence conservee : traefik/dynamic/tls.yml arrive dans
+      # ${REMOTE_APP_DIR}/traefik/dynamic/, le script dans scripts/backup/).
       - name: Transfer Compose and Traefik configuration
         uses: appleboy/scp-action@v1.0.0
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: ${{ env.COMPOSE_FILE }},traefik/dynamic/tls.yml
+          source: ${{ env.COMPOSE_FILE }},traefik/dynamic/tls.yml,scripts/backup/pg-backup.sh
           target: ${{ env.REMOTE_APP_DIR }}
           overwrite: true
           # Aucun secret dans ces fichiers : uniquement des references

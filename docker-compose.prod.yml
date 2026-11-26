@@ -95,6 +95,32 @@ services:
       retries: 5
     logging: *default-logging
 
+  # Sauvegarde PostgreSQL (T17) : pg_dump au demarrage puis toutes les 24 h,
+  # retention 14 jours, dans ${APP_DIR}/backups (hors volume de la base).
+  # Restauration et verification : voir scripts/backup/pg-backup.sh.
+  backup:
+    image: postgres:16-alpine
+    container_name: caixadev_backup
+    restart: always
+    entrypoint: ["/bin/sh", "/opt/backup/pg-backup.sh"]
+    command: ["loop"]
+    environment:
+      PGHOST: postgres
+      PGDATABASE: caixadev
+      PGUSER: ${DB_USERNAME:-postgres}
+      PGPASSWORD: ${DB_PASSWORD}
+      BACKUP_RETENTION_DAYS: "14"
+      BACKUP_INTERVAL_SECONDS: "86400"
+    volumes:
+      - ./scripts/backup:/opt/backup:ro
+      - ./backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - caixanet
+    logging: *default-logging
+
   backend:
     image: ${IMAGE_PREFIX:?IMAGE_PREFIX is required}/backend:${IMAGE_TAG:-latest}
     container_name: caixadev_backend
