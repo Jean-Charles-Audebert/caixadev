@@ -1,0 +1,79 @@
+# Middlewares de securite Traefik (T38, T39), charges par le provider file.
+# References depuis le Compose sous la forme <nom>@file.
+
+http:
+  middlewares:
+    # --- Origine : seul Cloudflare peut joindre le VPS en HTTPS -------------
+    # Sans cette restriction, un client pourrait contourner Cloudflare (WAF,
+    # cache, protection DDoS) en visant directement l'IP du VPS et forger
+    # l'en-tete CF-Connecting-IP utilise par la limitation de debit.
+    # Liste officielle : https://www.cloudflare.com/ips-v4 et /ips-v6
+    # (relevee le 2026-11-26). A mettre a jour si Cloudflare l'etend : un
+    # point de presence absent de la liste recevrait des 403.
+    cloudflare-only:
+      ipAllowList:
+        sourceRange:
+          - 173.245.48.0/20
+          - 103.21.244.0/22
+          - 103.22.200.0/22
+          - 103.31.4.0/22
+          - 141.101.64.0/18
+          - 108.162.192.0/18
+          - 190.93.240.0/20
+          - 188.114.96.0/20
+          - 197.234.240.0/22
+          - 198.41.128.0/17
+          - 162.158.0.0/15
+          - 104.16.0.0/13
+          - 104.24.0.0/14
+          - 172.64.0.0/13
+          - 131.0.72.0/22
+          - 2400:cb00::/32
+          - 2606:4700::/32
+          - 2803:f800::/32
+          - 2405:b500::/32
+          - 2405:8100::/32
+          - 2a06:98c0::/29
+          - 2c0f:f248::/32
+
+    # --- En-tetes communs a toutes les reponses HTTPS (T39) ----------------
+    # Appliques par Traefik, ils ne dependent plus des add_header de nginx
+    # (dont l'heritage se perd dans les blocs location, constat P3-15).
+    security-headers:
+      headers:
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        # Pas de preload : inscription quasi irreversible dans les navigateurs.
+        stsPreload: false
+        contentTypeNosniff: true
+        frameDeny: true
+        referrerPolicy: strict-origin-when-cross-origin
+        permissionsPolicy: "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+        customResponseHeaders:
+          X-Powered-By: ""
+          Server: ""
+
+    # --- CSP de la vitrine ------------------------------------------------
+    # Badges servis par img.shields.io ; aucun script ni style externe.
+    csp-site:
+      headers:
+        contentSecurityPolicy: "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https://img.shields.io data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests"
+
+    # --- CSP de l'application (SPA React + API same-origin) ---------------
+    # Les attributs style de React passent par le CSSOM : pas de
+    # 'unsafe-inline' necessaire. Service worker et manifeste servis en self.
+    csp-app:
+      headers:
+        contentSecurityPolicy: "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests"
+
+    # --- Limitation de debit de la connexion (T38) -------------------------
+    # Par adresse IP du client reelle (CF-Connecting-IP, fiable puisque seul
+    # Cloudflare atteint l'origine) : rafale de 5, puis 5 tentatives par
+    # minute. Au-dela : 429, visible dans le journal d'acces Traefik.
+    login-ratelimit:
+      rateLimit:
+        average: 5
+        period: 1m
+        burst: 5
+        sourceCriterion:
+          requestHeaderName: CF-Connecting-IP

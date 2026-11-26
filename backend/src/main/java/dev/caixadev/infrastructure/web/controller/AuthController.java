@@ -2,20 +2,24 @@ package dev.caixadev.infrastructure.web.controller;
 
 import dev.caixadev.application.dto.request.LoginRequest;
 import dev.caixadev.application.dto.response.AuthResponse;
+import dev.caixadev.domain.exception.InvalidCredentialsException;
 import dev.caixadev.domain.exception.InvalidTokenException;
 import dev.caixadev.domain.model.LoginResult;
 import dev.caixadev.domain.port.in.AuthUseCase;
 import dev.caixadev.infrastructure.security.CookieUtils;
+import dev.caixadev.infrastructure.web.ClientInfo;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Arrays;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
@@ -27,9 +31,19 @@ public class AuthController {
     @PostMapping("/login")
     public ResponseEntity<AuthResponse> login(
             @Valid @RequestBody LoginRequest request,
+            HttpServletRequest httpRequest,
             HttpServletResponse response
     ) {
-        LoginResult result = authUseCase.login(request.email(), request.password());
+        LoginResult result;
+        try {
+            result = authUseCase.login(request.email(), request.password());
+        } catch (InvalidCredentialsException e) {
+            // T38 : chaque echec est journalise (IP reelle, email masque).
+            log.warn("Echec de connexion ip={} email={}",
+                    ClientInfo.ip(httpRequest), ClientInfo.maskEmail(request.email()));
+            throw e;
+        }
+        log.info("Connexion reussie userId={} ip={}", result.user().id(), ClientInfo.ip(httpRequest));
         cookieUtils.setAccessTokenCookie(response, result.accessToken());
         cookieUtils.setRefreshTokenCookie(response, result.rawRefreshToken());
         return ResponseEntity.ok(AuthResponse.from(result.user()));

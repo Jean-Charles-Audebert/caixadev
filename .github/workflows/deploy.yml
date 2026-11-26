@@ -177,7 +177,7 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: ${{ env.COMPOSE_FILE }},traefik/dynamic/tls.yml,scripts/backup/pg-backup.sh
+          source: ${{ env.COMPOSE_FILE }},traefik/dynamic/tls.yml,traefik/dynamic/security.yml,scripts/backup/pg-backup.sh
           target: ${{ env.REMOTE_APP_DIR }}
           overwrite: true
           # Aucun secret dans ces fichiers : uniquement des references
