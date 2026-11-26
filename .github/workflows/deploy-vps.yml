@@ -1,0 +1,214 @@
+name: Deploy to VPS (reusable)
+
+# Deploiement d'un commit deja construit sur le VPS. Appele par :
+#   - deploy.yml   : apres CI et publication des images (ref = commit pousse) ;
+#   - rollback.yml : redeploiement d'un commit anterieur (T18), sans rebuild.
+# La configuration transferee (Compose, Traefik, script de sauvegarde) et les
+# images sont celles du meme commit : un rollback revient a l'etat complet de
+# ce commit, pas seulement a ses images.
+#
+# Pas de bloc concurrency ici : il est porte par les workflows appelants
+# (groupe deploy-production), sinon le workflow appele se bloque lui-meme.
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: SHA complet (40 caracteres) du commit a deployer
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  REMOTE_APP_DIR: /opt/caixadev
+  COMPOSE_FILE: docker-compose.prod.yml
+
+jobs:
+  deploy:
+    name: Deploy to VPS
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      # Jeton utilise pour `docker login ghcr.io` sur le VPS : sans ce droit,
+      # la recuperation des images privees echoue.
+      packages: read
+
+    steps:
+      # Le SHA sert de tag d'image et de reference Git : on refuse tout ce qui
+      # n'est pas un SHA complet (pas de branche, de tag ni de texte libre).
+      - name: Validate ref
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$REF" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::ref doit etre un SHA complet de 40 caracteres hexadecimaux, recu : $REF"
+            exit 1
+          fi
+
+      # T41 / P3-24 : sans empreinte, appleboy accepte n'importe quelle cle
+      # d'hote (InsecureIgnoreHostKey). On refuse de se connecter sans elle.
+      - name: Preflight - SSH host fingerprint
+        env:
+          VPS_SSH_FINGERPRINT: ${{ secrets.VPS_SSH_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          case "$VPS_SSH_FINGERPRINT" in
+            SHA256:?*) echo "Empreinte SSH presente." ;;
+            *)
+              echo "::error::VPS_SSH_FINGERPRINT absent ou mal forme (attendu : SHA256:...)"
+              exit 1
+              ;;
+          esac
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      # Le prefixe est calcule dans ce job au lieu d'etre recu en sortie d'un
+      # autre : GitHub supprime toute sortie de job qui contient la valeur
+      # d'un secret (ici, le nom du depot contient celle de DB_USERNAME), ce
+      # qui livrait un IMAGE_PREFIX vide.
+      - name: Compute lowercase image prefix
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          prefix="${REGISTRY}/$(printf '%s' "$REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          echo "IMAGE_PREFIX=$prefix" >> "$GITHUB_ENV"
+
+      # ADR-0004 : le Compose de production est transfere par la CI.
+      # Le repertoire doit exister avant le transfert ; s'il ne peut pas etre
+      # cree (utilisateur sans droit sur /opt), l'etape echoue explicitement.
+      - name: Prepare remote directory
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          fingerprint: ${{ secrets.VPS_SSH_FINGERPRINT }}
+          script: |
+            set -eu
+            install -d -m 0755 "${{ env.REMOTE_APP_DIR }}"
+            # Sauvegardes PostgreSQL (T17) : contiennent des donnees sensibles.
+            install -d -m 0700 "${{ env.REMOTE_APP_DIR }}/backups"
+
+      # Compose, configuration dynamique Traefik et script de sauvegarde
+      # (arborescence conservee : traefik/dynamic/tls.yml arrive dans
+      # ${REMOTE_APP_DIR}/traefik/dynamic/, le script dans scripts/backup/).
+      # Un commit anterieur a l'un de ces fichiers ne peut pas etre deploye :
+      # le transfert echoue avant toute modification sur le VPS.
+      - name: Transfer Compose and Traefik configuration
+        uses: appleboy/scp-action@v1.0.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          fingerprint: ${{ secrets.VPS_SSH_FINGERPRINT }}
+          source: ${{ env.COMPOSE_FILE }},traefik/dynamic/tls.yml,traefik/dynamic/security.yml,scripts/backup/pg-backup.sh
+          target: ${{ env.REMOTE_APP_DIR }}
+          overwrite: true
+          # Aucun secret dans ces fichiers : uniquement des references
+          # ${VARIABLE} resolues par docker compose, et des chemins vers le
+          # certificat depose a la main sur le VPS.
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.5
+        env:
+          APP_DIR: ${{ env.REMOTE_APP_DIR }}
+          COMPOSE_FILE_NAME: ${{ env.COMPOSE_FILE }}
+          IMAGE_PREFIX: ${{ env.IMAGE_PREFIX }}
+          IMAGE_TAG: ${{ inputs.ref }}
+          GHCR_ACTOR: ${{ github.actor }}
+          GHCR_TOKEN: ${{ github.token }}
+          DB_USERNAME: ${{ secrets.DB_USERNAME }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          SUPER_ADMIN_EMAIL: ${{ secrets.SUPER_ADMIN_EMAIL }}
+          SUPER_ADMIN_PASSWORD: ${{ secrets.SUPER_ADMIN_PASSWORD }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          fingerprint: ${{ secrets.VPS_SSH_FINGERPRINT }}
+          envs: APP_DIR,COMPOSE_FILE_NAME,IMAGE_PREFIX,IMAGE_TAG,GHCR_ACTOR,GHCR_TOKEN,DB_USERNAME,DB_PASSWORD,JWT_SECRET,SUPER_ADMIN_EMAIL,SUPER_ADMIN_PASSWORD
+          script: |
+            set -eu
+
+            # Garde-fous : aucune commande destructive ne doit s'executer avec
+            # une variable vide, meme si le mapping env/envs est incomplet.
+            : "${APP_DIR:?APP_DIR is required}"
+            : "${COMPOSE_FILE_NAME:?COMPOSE_FILE_NAME is required}"
+            : "${IMAGE_PREFIX:?IMAGE_PREFIX is required}"
+            : "${IMAGE_TAG:?IMAGE_TAG is required}"
+            : "${GHCR_ACTOR:?GHCR_ACTOR is required}"
+            : "${GHCR_TOKEN:?GHCR_TOKEN is required}"
+            : "${DB_USERNAME:?DB_USERNAME is required}"
+            : "${DB_PASSWORD:?DB_PASSWORD is required}"
+            : "${JWT_SECRET:?JWT_SECRET is required}"
+            : "${SUPER_ADMIN_EMAIL:?SUPER_ADMIN_EMAIL is required}"
+            : "${SUPER_ADMIN_PASSWORD:?SUPER_ADMIN_PASSWORD is required}"
+
+            case "$IMAGE_PREFIX" in
+              *[A-Z]*)
+                echo "IMAGE_PREFIX must be lowercase, got: $IMAGE_PREFIX" >&2
+                exit 1
+                ;;
+            esac
+
+            cd "$APP_DIR"
+            if [ ! -f "$COMPOSE_FILE_NAME" ]; then
+              echo "ERROR: $COMPOSE_FILE_NAME absent dans $APP_DIR (transfert echoue)" >&2
+              exit 1
+            fi
+
+            # Le certificat Cloudflare Origin CA n'est pas dans le depot : sans
+            # lui, Traefik servirait un certificat par defaut refuse par
+            # Cloudflare en Full (strict). On s'arrete avant tout changement.
+            for f in certs/origin.pem certs/origin.key; do
+              if [ ! -s "$f" ]; then
+                echo "ERROR: $APP_DIR/$f absent ou vide (certificat Origin CA, voir traefik/dynamic/tls.yml)" >&2
+                exit 1
+              fi
+            done
+
+            # Historique des deploiements (T18) : une ligne par deploiement
+            # reussi, la derniere est la version en service.
+            HISTORY="$APP_DIR/deploy-history.log"
+            current="$(tail -n 1 "$HISTORY" 2>/dev/null | cut -d ' ' -f 2 || true)"
+            echo "Version en service : ${current:-inconnue}"
+            echo "Deploiement de ${IMAGE_PREFIX} (tag ${IMAGE_TAG})"
+
+            # Jeton ephemere du workflow. `docker login` l'ecrit dans
+            # ~/.docker/config.json du compte de deploiement ; le trap le
+            # supprime en sortie, y compris en cas d'echec.
+            printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GHCR_ACTOR" --password-stdin
+            trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+
+            # Echoue si le YAML est invalide ou si une variable `${VAR:?}`
+            # manque. Une variable vide non requise ne fait PAS echouer
+            # `config -q` : elle est deja couverte par les garde-fous ci-dessus.
+            docker compose -f "$COMPOSE_FILE_NAME" config -q
+            # Echoue si une image demandee n'existe pas ou n'est pas accessible
+            # (rollback vers un commit dont les images n'ont jamais ete
+            # publiees) : rien n'a encore change sur le VPS a ce stade.
+            docker compose -f "$COMPOSE_FILE_NAME" pull
+
+            # Sauvegarde juste avant le changement de version : un deploiement
+            # peut appliquer des migrations Flyway, un rollback ne les annule
+            # pas. En cas d'echec de la sauvegarde, on ne deploie pas.
+            # Absent au premier deploiement : rien a sauvegarder.
+            if [ -n "$(docker compose -f "$COMPOSE_FILE_NAME" ps --status running -q backup)" ]; then
+              docker compose -f "$COMPOSE_FILE_NAME" exec -T backup /bin/sh /opt/backup/pg-backup.sh once
+            else
+              echo "Service backup arrete ou absent : pas de sauvegarde avant deploiement."
+            fi
+
+            docker compose -f "$COMPOSE_FILE_NAME" up -d --remove-orphans
+            printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$IMAGE_TAG" >> "$HISTORY"
+            # Ne supprime que les images non referencees par un tag : les
+            # images des versions precedentes restent disponibles localement.
+            docker image prune -f
