@@ -36,8 +36,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-    outputs:
-      image_prefix: ${{ steps.image_prefix.outputs.value }}
 
     steps:
       # Un secret manquant doit bloquer AVANT toute publication d'image.
@@ -142,6 +140,19 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Le prefixe est recalcule ici au lieu d'etre recu en sortie du job
+      # build-and-push : GitHub supprime toute sortie de job qui contient la
+      # valeur d'un secret (ici, le nom du depot contient celle de
+      # DB_USERNAME), ce qui livrait un IMAGE_PREFIX vide. Meme calcul que
+      # dans build-and-push.
+      - name: Compute lowercase image prefix
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          prefix="${REGISTRY}/$(printf '%s' "$REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          echo "IMAGE_PREFIX=$prefix" >> "$GITHUB_ENV"
+
       # ADR-0004 : le Compose de production est transfere par la CI.
       # Le repertoire doit exister avant le transfert ; s'il ne peut pas etre
       # cree (utilisateur sans droit sur /opt), l'etape echoue explicitement.
@@ -151,7 +162,6 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script_stop: true
           script: |
             set -eu
             install -d -m 0755 "${{ env.REMOTE_APP_DIR }}"
@@ -176,7 +186,7 @@ jobs:
         env:
           APP_DIR: ${{ env.REMOTE_APP_DIR }}
           COMPOSE_FILE_NAME: ${{ env.COMPOSE_FILE }}
-          IMAGE_PREFIX: ${{ needs.build-and-push.outputs.image_prefix }}
+          IMAGE_PREFIX: ${{ env.IMAGE_PREFIX }}
           IMAGE_TAG: ${{ github.sha }}
           GHCR_ACTOR: ${{ github.actor }}
           GHCR_TOKEN: ${{ github.token }}
@@ -189,7 +199,6 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script_stop: true
           envs: APP_DIR,COMPOSE_FILE_NAME,IMAGE_PREFIX,IMAGE_TAG,GHCR_ACTOR,GHCR_TOKEN,DB_USERNAME,DB_PASSWORD,JWT_SECRET,SUPER_ADMIN_EMAIL,SUPER_ADMIN_PASSWORD
           script: |
             set -eu
