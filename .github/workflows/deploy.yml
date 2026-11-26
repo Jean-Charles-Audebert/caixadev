@@ -118,6 +118,17 @@ jobs:
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,mode=max,scope=frontend
 
+      - name: Build & push site
+        uses: docker/build-push-action@v7
+        with:
+          context: site
+          push: true
+          tags: |
+            ${{ steps.image_prefix.outputs.value }}/site:latest
+            ${{ steps.image_prefix.outputs.value }}/site:${{ github.sha }}
+          cache-from: type=gha,scope=site
+          cache-to: type=gha,mode=max,scope=site
+
   deploy:
     name: Deploy to VPS
     runs-on: ubuntu-26.04
@@ -145,17 +156,20 @@ jobs:
             set -eu
             install -d -m 0755 "${{ env.REMOTE_APP_DIR }}"
 
-      - name: Transfer docker-compose.prod.yml
+      # Compose + configuration dynamique Traefik (arborescence conservee :
+      # traefik/dynamic/tls.yml arrive dans ${REMOTE_APP_DIR}/traefik/dynamic/).
+      - name: Transfer Compose and Traefik configuration
         uses: appleboy/scp-action@v1.0.0
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: ${{ env.COMPOSE_FILE }}
+          source: ${{ env.COMPOSE_FILE }},traefik/dynamic/tls.yml
           target: ${{ env.REMOTE_APP_DIR }}
           overwrite: true
-          # Le fichier ne contient aucun secret : uniquement des references
-          # ${VARIABLE} resolues a l'execution par docker compose.
+          # Aucun secret dans ces fichiers : uniquement des references
+          # ${VARIABLE} resolues par docker compose, et des chemins vers le
+          # certificat depose a la main sur le VPS.
 
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.5
@@ -206,6 +220,16 @@ jobs:
               echo "ERROR: $COMPOSE_FILE_NAME absent dans $APP_DIR (transfert echoue)" >&2
               exit 1
             fi
+
+            # Le certificat Cloudflare Origin CA n'est pas dans le depot : sans
+            # lui, Traefik servirait un certificat par defaut refuse par
+            # Cloudflare en Full (strict). On s'arrete avant tout changement.
+            for f in certs/origin.pem certs/origin.key; do
+              if [ ! -s "$f" ]; then
+                echo "ERROR: $APP_DIR/$f absent ou vide (certificat Origin CA, voir traefik/dynamic/tls.yml)" >&2
+                exit 1
+              fi
+            done
 
             echo "Deploiement de ${IMAGE_PREFIX} (tag ${IMAGE_TAG})"
 

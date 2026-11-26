@@ -1,4 +1,81 @@
+# Compose de production, transfere sur le VPS par deploy.yml (ADR-0004).
+#
+# Routage (ADR-0003, ADR-0009) : Traefik est le seul service qui publie des
+# ports. Il termine le TLS avec le certificat Cloudflare Origin CA et route
+# par nom d'hote :
+#   - ${DOMAIN} (et www.)  -> site      (vitrine statique)
+#   - app.${DOMAIN}        -> frontend  (SPA + proxy /api vers le backend)
+# api.${DOMAIN} et mcp.${DOMAIN} sont reserves aux futurs outils.
+#
+# Prerequis sur le VPS (hors depot) : ${APP_DIR}/certs/origin.pem et
+# ${APP_DIR}/certs/origin.key (voir traefik/dynamic/tls.yml).
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
+  traefik:
+    # Majeure epinglee : les correctifs v3 (dont la compatibilite avec les
+    # versions recentes de l'API Docker) sont recuperes a chaque deploiement.
+    image: traefik:v3
+    container_name: caixadev_traefik
+    restart: always
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=caixadev_web
+      - --providers.file.directory=/etc/traefik/dynamic
+      - --providers.file.watch=true
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.websecure.http.tls=true
+      # Dashboard prive : servi sur l'entrypoint interne "traefik" (:8080),
+      # publie uniquement sur 127.0.0.1 du VPS. Acces par tunnel SSH :
+      #   ssh -L 8080:127.0.0.1:8080 <vps>  puis  http://localhost:8080/
+      - --api.dashboard=true
+      - --api.insecure=true
+      - --ping=true
+      - --log.level=INFO
+      - --accesslog=true
+    ports:
+      - "80:80"
+      - "443:443"
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/dynamic:/etc/traefik/dynamic:ro
+      - ./certs:/certs:ro
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - web
+    logging: *default-logging
+
+  site:
+    image: ${IMAGE_PREFIX:?IMAGE_PREFIX is required}/site:${IMAGE_TAG:-latest}
+    container_name: caixadev_site
+    restart: always
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.site.rule=Host(`${DOMAIN:-caixadev.dev}`) || Host(`www.${DOMAIN:-caixadev.dev}`)
+      - traefik.http.routers.site.entrypoints=websecure
+      - traefik.http.routers.site.middlewares=www-to-apex
+      - traefik.http.middlewares.www-to-apex.redirectregex.regex=^https://www\.(.+)
+      - traefik.http.middlewares.www-to-apex.redirectregex.replacement=https://$${1}
+      - traefik.http.middlewares.www-to-apex.redirectregex.permanent=true
+      - traefik.http.services.site.loadbalancer.server.port=80
+    networks:
+      - web
+    logging: *default-logging
+
   postgres:
     image: postgres:16-alpine
     container_name: caixadev_postgres
@@ -16,6 +93,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    logging: *default-logging
 
   backend:
     image: ${IMAGE_PREFIX:?IMAGE_PREFIX is required}/backend:${IMAGE_TAG:-latest}
@@ -29,27 +107,36 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       SUPER_ADMIN_EMAIL: ${SUPER_ADMIN_EMAIL}
       SUPER_ADMIN_PASSWORD: ${SUPER_ADMIN_PASSWORD}
+      CORS_ALLOWED_ORIGINS: https://app.${DOMAIN:-caixadev.dev}
     depends_on:
       postgres:
         condition: service_healthy
     networks:
       - caixanet
+    logging: *default-logging
 
   frontend:
     image: ${IMAGE_PREFIX:?IMAGE_PREFIX is required}/frontend:${IMAGE_TAG:-latest}
     container_name: caixadev_frontend
     restart: always
-    ports:
-      - "80:80"
-      - "443:443"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.app.rule=Host(`app.${DOMAIN:-caixadev.dev}`)
+      - traefik.http.routers.app.entrypoints=websecure
+      - traefik.http.services.app.loadbalancer.server.port=80
     depends_on:
       - backend
     networks:
+      - web
       - caixanet
+    logging: *default-logging
 
 volumes:
   postgres_data:
 
 networks:
+  # Reseau expose a Traefik : uniquement les services routes publiquement.
+  web:
+    name: caixadev_web
+  # Reseau interne applicatif : backend et base ne sont jamais vus par Traefik.
   caixanet:
-

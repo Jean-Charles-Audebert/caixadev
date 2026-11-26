@@ -117,3 +117,29 @@ jobs:
 
       - name: Verify frontend image
         run: docker image inspect caixadev-frontend:ci > /dev/null
+
+      - name: Build site image
+        uses: docker/build-push-action@v7
+        with:
+          context: site
+          push: false
+          load: true
+          tags: caixadev-site:ci
+          cache-from: type=gha,scope=site
+          cache-to: ${{ github.event_name != 'pull_request' && 'type=gha,mode=max,scope=site' || '' }}
+
+      - name: Verify site image
+        run: docker image inspect caixadev-site:ci > /dev/null
+
+      # Le Compose de production doit rester valide (YAML, interpolation,
+      # variables obligatoires). Valeurs factices : rien n'est demarre.
+      - name: Validate production Compose
+        env:
+          IMAGE_PREFIX: ghcr.io/ci/check
+          IMAGE_TAG: ci
+          DB_USERNAME: ci
+          DB_PASSWORD: ci
+          JWT_SECRET: ci-check-secret-key-at-least-32-chars
+          SUPER_ADMIN_EMAIL: ci@example.invalid
+          SUPER_ADMIN_PASSWORD: ci
+        run: docker compose -f docker-compose.prod.yml config -q

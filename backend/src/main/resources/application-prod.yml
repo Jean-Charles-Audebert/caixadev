@@ -35,4 +35,6 @@ logging:
     dev.caixadev: INFO
 
 cors:
-  allowed-origins: "https://caixadev.dev"
+  # Origine de l'application web (ADR-0009). Fournie par le Compose de
+  # production ; la valeur par defaut correspond au domaine cible.
+  allowed-origins: ${CORS_ALLOWED_ORIGINS:https://app.caixadev.dev}
