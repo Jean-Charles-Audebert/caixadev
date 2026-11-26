@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getMyProjects } from '../services/projectService';
 import type { ProjectInfo } from '../types';
@@ -23,6 +24,15 @@ export default function DashboardPage() {
         <p style={{ color: 'var(--color-text-muted)', marginTop: '0.3rem' }}>
           Bienvenue{user?.displayName ? `, ${user.displayName}` : ''} !
         </p>
+
+        {user?.superAdmin && (
+          <section style={{ marginTop: '1.5rem' }}>
+            <h3>Administration</h3>
+            <Link to="/admin/api-keys" className="btn outline">
+              Clés API
+            </Link>
+          </section>
+        )}
 
         <section style={{ marginTop: '2rem' }}>
           {loading && <p>Chargement des projets…</p>}
